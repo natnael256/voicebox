@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pipeline Quest</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a sticky HUD over a DAG "world map"; each node is a study module you run like a pipeline job. */
+:root{
+  --bg:#EDF0F6; --surface:#FFFFFF; --sunk:#E3E8F1; --ink:#131A2C; --muted:#586379; --line:#C9D1DF;
+  --accent:#2A50E0; --accent-ink:#FFFFFF; --accent-soft:rgba(42,80,224,.10);
+  --xp:#B87400; --xp-soft:rgba(217,138,0,.14); --ok:#17835A; --ok-soft:rgba(23,131,90,.12); --bad:#C2332C; --bad-soft:rgba(194,51,44,.10);
+  --f-display:"Chakra Petch","Trebuchet MS",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0C1120; --surface:#151C30; --sunk:#10172A; --ink:#E5E9F3; --muted:#94A0B9; --line:#2A3452;
+  --accent:#7290FF; --accent-ink:#0C1120; --accent-soft:rgba(114,144,255,.14);
+  --xp:#F2B33D; --xp-soft:rgba(242,179,61,.14); --ok:#3CC489; --ok-soft:rgba(60,196,137,.13); --bad:#FF6F65; --bad-soft:rgba(255,111,101,.12);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0C1120; --surface:#151C30; --sunk:#10172A; --ink:#E5E9F3; --muted:#94A0B9; --line:#2A3452;
+  --accent:#7290FF; --accent-ink:#0C1120; --accent-soft:rgba(114,144,255,.14);
+  --xp:#F2B33D; --xp-soft:rgba(242,179,61,.14); --ok:#3CC489; --ok-soft:rgba(60,196,137,.13); --bad:#FF6F65; --bad-soft:rgba(255,111,101,.12);
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+code,.mono{font-family:var(--f-mono)}
+code{font-size:.9em;background:var(--sunk);padding:.05em .35em;border-radius:4px}
+.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* HUD */
+.hud{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.hud .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:10px 24px;padding-block:12px}
+.brand{font-family:var(--f-display);font-weight:700;font-size:20px;letter-spacing:.02em;display:flex;align-items:center;gap:10px;margin-right:auto}
+.brand svg{flex:none}
+.stat{display:flex;flex-direction:column;gap:2px;min-width:0}
+.lbl{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.val{font-family:var(--f-display);font-weight:600;font-size:16px;font-variant-numeric:tabular-nums}
+.xpbar{width:180px;max-width:42vw;height:6px;background:var(--sunk);border-radius:3px;overflow:hidden}
+.xpbar i{display:block;height:100%;background:var(--xp);width:0;transition:width .6s ease}
+
+main{padding-block:28px 56px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(28px,5vw,40px);font-weight:700}
+h2{font-size:24px;font-weight:600}
+h3{font-size:17px;font-weight:600}
+.lede{color:var(--muted);max-width:62ch;margin:10px 0 0}
+.section{display:flex;flex-direction:column;gap:18px}
+.stack{display:flex;flex-direction:column;gap:28px}
+
+/* Map */
+.mapcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:8px;overflow:hidden}
+#map{position:relative;width:100%}
+#edges{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#edges path{fill:none;stroke:var(--line);stroke-width:2;stroke-dasharray:5 6}
+#edges path.live{stroke:var(--accent);stroke-dasharray:6 8;animation:flow 1.1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-14}}
+.node{position:absolute;transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;
+  padding:9px 11px;text-align:left;display:flex;flex-direction:column;gap:3px;transition:transform .15s ease,border-color .15s,box-shadow .15s}
+.node .id{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;color:var(--muted)}
+.node .nm{font-family:var(--f-display);font-weight:600;font-size:15px;line-height:1.15}
+.node .st{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em}
+.node.ready{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.node.ready .st{color:var(--accent)}
+.node.done{border-color:var(--ok)}
+.node.done .st{color:var(--xp);font-size:13px;letter-spacing:.12em}
+.node.locked{cursor:not-allowed;background:var(--sunk);color:var(--muted)}
+.node.boss{border-style:double;border-width:4px}
+.node:not(.locked):hover{transform:translate(-50%,-50%) translateY(-2px)}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;border:1.5px solid}
+
+/* Badges */
+.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.badge{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.badge .ic{flex:none;width:36px;height:36px;border-radius:8px;display:grid;place-items:center;font-family:var(--f-display);font-weight:700;background:var(--sunk);color:var(--muted)}
+.badge.on .ic{background:var(--xp-soft);color:var(--xp)}
+.badge:not(.on){opacity:.6}
+.badge b{display:block;font-weight:600;font-size:14px}
+.badge small{color:var(--muted);font-size:12.5px;line-height:1.35;display:block}
+
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{border:1.5px solid var(--line);background:var(--surface);border-radius:9px;padding:9px 16px;font-weight:600}
+.btn:hover{border-color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted);padding-inline:8px}
+.btn.danger{color:var(--bad)}
+.kbd{font-family:var(--f-mono);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+
+/* Module */
+.modhead{display:flex;flex-direction:column;gap:8px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tab{border:0;background:none;padding:10px 14px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.notes{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.note h3{font-size:15.5px;margin-bottom:6px}
+.note p{margin:0;color:var(--muted);font-size:14.5px}
+.note p code{color:var(--ink)}
+
+/* Quiz */
+.quiz{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:20px;align-items:start}
+@media (max-width:760px){.quiz{grid-template-columns:minmax(0,1fr)}}
+.qcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.qmeta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.qtext{font-size:18px;font-weight:500;line-height:1.45;margin:0}
+pre{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-family:var(--f-mono);font-size:13.5px;line-height:1.5}
+.opts{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;gap:12px;align-items:flex-start;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:11px 14px;transition:border-color .12s,background .12s}
+.opt:hover:not([disabled]){border-color:var(--accent);background:var(--accent-soft)}
+.opt .k{flex:none;font-family:var(--f-mono);font-size:12px;width:22px;height:22px;border-radius:5px;display:grid;place-items:center;border:1px solid var(--line);color:var(--muted);margin-top:1px}
+.opt[disabled]{cursor:default}
+.opt.right{border-color:var(--ok);background:var(--ok-soft)}
+.opt.right .k{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.opt.wrong{border-color:var(--bad);background:var(--bad-soft)}
+.opt.wrong .k{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.opt.dim{opacity:.55}
+.why{border-left:3px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 8px 8px 0;font-size:14.5px}
+.why b{font-family:var(--f-display)}
+.side{display:flex;flex-direction:column;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+.side .line{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.lives{display:flex;gap:5px}
+.lives i{width:14px;height:14px;border-radius:3px;background:var(--ok)}
+.lives i.lost{background:var(--sunk);border:1.5px solid var(--bad)}
+.combo{font-family:var(--f-display);font-weight:700;font-size:22px;color:var(--xp);font-variant-numeric:tabular-nums}
+.pips{display:flex;gap:4px}
+.pips i{flex:1;height:5px;border-radius:3px;background:var(--sunk)}
+.pips i.ok{background:var(--ok)} .pips i.bad{background:var(--bad)} .pips i.cur{background:var(--accent)}
+.pop{font-family:var(--f-display);font-weight:700;color:var(--xp);animation:pop .7s ease}
+@keyframes pop{0%{transform:translateY(6px);opacity:0}30%{opacity:1}100%{transform:none}}
+
+/* Result */
+.result{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:18px}
+.verdict{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,6vw,46px);letter-spacing:.03em}
+.verdict.ok{color:var(--ok)} .verdict.bad{color:var(--bad)}
+.stars{font-size:34px;letter-spacing:.1em;color:var(--xp)}
+.stars .off{color:var(--line)}
+.log{font-family:var(--f-mono);font-size:13.5px;background:var(--sunk);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:auto 1fr;gap:4px 18px;font-variant-numeric:tabular-nums}
+.log span:nth-child(odd){color:var(--muted)}
+.miss{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.miss p{margin:0}
+.miss .a{color:var(--ok);font-weight:600}
+.miss .w{color:var(--muted);font-size:14px}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:600;transition:.3s;pointer-events:none;z-index:20;max-width:calc(100% - 32px)}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.foot{color:var(--muted);font-size:13px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="hud">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="5" cy="13" r="3.5" fill="var(--accent)"/><circle cx="20" cy="6" r="3.5" fill="var(--xp)"/><circle cx="20" cy="20" r="3.5" fill="var(--ok)"/><path d="M8 12 17 7M8 14l9 5" stroke="var(--muted)" stroke-width="1.6" fill="none"/></svg>
+      Pipeline Quest
+    </div>
+    <div class="stat"><span class="lbl">Rank</span><span class="val" id="hudRank">Intern</span></div>
+    <div class="stat"><span class="lbl" id="hudXpLbl">XP</span><span class="val" id="hudXp">0</span><div class="xpbar"><i id="hudBar"></i></div></div>
+    <div class="stat"><span class="lbl">Stars</span><span class="val" id="hudStars">0 / 27</span></div>
+  </div>
+</header>
+
+<main class="wrap" id="app"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ---------- Content ---------- */
+const MODULES = [
+{ id:"found", code:"M01", name:"Foundations", col:0,row:.5, deps:[],
+  blurb:"The vocabulary every data engineer uses daily: workloads, patterns and the data lifecycle.",
+  notes:[
+   ["OLTP vs OLAP","OLTP systems serve apps with many small, fast reads and writes (row-oriented, normalized). OLAP systems serve analytics: big scans and aggregations over history (columnar, denormalized)."],
+   ["ETL vs ELT","ETL transforms data before loading it into the target. ELT loads raw data first and transforms inside the warehouse with its own compute, the pattern dbt is built around."],
+   ["Batch vs streaming","Batch processes bounded chunks of data on a schedule (hourly, daily). Streaming processes an unbounded flow of events continuously, with latency in seconds."],
+   ["Lake, warehouse, lakehouse","A lake is cheap object storage holding raw files in any format. A warehouse is managed, schema'd and tuned for SQL. A lakehouse adds ACID tables and schemas to lake files via open table formats."],
+   ["The lifecycle","Generation → ingestion → storage → transformation → serving. Security, orchestration and data quality run underneath every stage."],
+   ["Idempotency","Running a job twice gives the same result as running it once. It is what makes retries and backfills safe, and you will see it in every module."]
+  ],
+  qs:[
+   {q:"A web shop's checkout database handles thousands of small inserts per second. What kind of system is it?",o:["OLTP","OLAP","A data lake","A feature store"],w:"Many small, concurrent transactional writes from an application is the definition of OLTP."},
+   {q:"Your team loads raw JSON into the warehouse, then cleans it with SQL models in dbt. This pattern is…",o:["ELT","ETL","CDC","Reverse ETL"],w:"Load first, transform in the warehouse afterwards: Extract, Load, Transform."},
+   {q:"Which workload is the best fit for streaming rather than batch?",o:["Flagging fraudulent card payments within seconds","The monthly finance report","A yearly cohort analysis","Rebuilding a dimension table every night"],w:"Streaming pays off when the value of the answer decays in seconds. The others are fine on a schedule."},
+   {q:"What does a lakehouse add on top of a plain data lake?",o:["ACID transactions and schema enforcement on files in object storage","Unlimited free compute","A row-oriented OLTP engine","Automatic dashboards"],w:"Table formats like Delta Lake and Iceberg bring transactions, schemas and time travel to Parquet files on S3/GCS/ADLS."},
+   {q:"A job is idempotent when…",o:["Running it twice produces the same result as running it once","It never fails","It finishes in under a minute","It only reads and never writes"],w:"Idempotency is about repeatability of the outcome, which makes retries harmless."},
+   {q:"\"Reverse ETL\" means…",o:["Syncing modeled warehouse data back into operational tools like a CRM","Loading rows in reverse chronological order","Undoing a failed load","Extracting data from application logs"],w:"Reverse ETL pushes curated data (e.g. a churn score) from the warehouse into tools like Salesforce or HubSpot."}
+  ]},
+{ id:"sql", code:"M02", name:"SQL", col:1,row:0, deps:["found"],
+  blurb:"The language of data. Joins, aggregation, window functions and the traps NULL sets for you.",
+  notes:[
+   ["Logical execution order","<code>FROM/JOIN</code> → <code>WHERE</code> → <code>GROUP BY</code> → <code>HAVING</code> → <code>SELECT</code> → <code>ORDER BY</code> → <code>LIMIT</code>. That is why a SELECT alias can't be used in WHERE."],
+   ["WHERE vs HAVING","<code>WHERE</code> filters rows before grouping. <code>HAVING</code> filters groups after aggregation, e.g. <code>HAVING COUNT(*) &gt; 5</code>."],
+   ["Join types","INNER keeps matches only. LEFT keeps every left row and fills NULLs where nothing matches. FULL keeps both sides. CROSS returns every combination."],
+   ["Window functions","<code>fn() OVER (PARTITION BY … ORDER BY …)</code> computes across related rows without collapsing them. Workhorses: <code>ROW_NUMBER</code>, <code>RANK</code>, <code>LAG</code>, <code>LEAD</code>, running <code>SUM</code>."],
+   ["NULL semantics","Any comparison with NULL is <em>unknown</em>, so <code>col = NULL</code> never matches; use <code>IS NULL</code>. <code>COUNT(col)</code> skips NULLs while <code>COUNT(*)</code> counts rows."],
+   ["CTEs","<code>WITH step AS (…)</code> names an intermediate result so long queries read top to bottom like a pipeline."]
+  ],
+  qs:[
+   {q:"Which clause filters groups after aggregation?",o:["HAVING","WHERE","ON","ORDER BY"],w:"WHERE runs before GROUP BY, so it can't see aggregates. HAVING runs after."},
+   {q:"The `users` table has 10 rows and 3 of them have a NULL `email`. What does this return?",c:"SELECT COUNT(*), COUNT(email)\nFROM users;",o:["10 and 7","10 and 10","7 and 7","7 and 10"],w:"COUNT(*) counts rows; COUNT(column) counts non-NULL values."},
+   {q:"You need each customer's most recent order. Which approach fits best?",o:["ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY ordered_at DESC), then keep rn = 1","SELECT DISTINCT customer_id … ORDER BY ordered_at","A CROSS JOIN of customers and orders","UNION ALL of every order table"],w:"Ranking within each customer and keeping the first row is the standard \"latest per group\" pattern."},
+   {q:"A LEFT JOIN from `customers` to `orders` returns…",o:["Every customer, with NULL order columns when there's no match","Only customers who have orders","Only orders without a customer","Every combination of customers and orders"],w:"LEFT JOIN preserves all rows of the left table."},
+   {q:"Are rows where `status` is NULL returned by this query?",c:"SELECT *\nFROM orders\nWHERE status <> 'cancelled';",o:["No. NULL <> 'cancelled' is unknown, so those rows are filtered out","Yes, NULL is not 'cancelled'","Only in PostgreSQL","Yes, but only with DISTINCT"],w:"Three-valued logic: WHERE keeps only TRUE. Add OR status IS NULL if you want them."},
+   {q:"Which function reads a value from the previous row in the same partition?",o:["LAG()","LEAD()","NTILE()","COALESCE()"],w:"LAG looks backwards, LEAD looks forwards. Handy for day-over-day deltas."}
+  ]},
+{ id:"store", code:"M03", name:"Storage & Formats", col:1,row:1, deps:["found"],
+  blurb:"How bytes sit on disk decides how fast and how cheap every query is.",
+  notes:[
+   ["Row vs columnar","Columnar formats (Parquet, ORC) store each column together, so a query reads only the columns it needs and compression works far better."],
+   ["Inside Parquet","Files are split into row groups, then column chunks. Each chunk stores min/max statistics, which lets engines skip blocks that can't match a filter (predicate pushdown)."],
+   ["Partitioning","Splitting a table into folders by a column such as <code>event_date</code> lets queries prune whole folders. High-cardinality partitions create the small files problem."],
+   ["Open table formats","Delta Lake, Apache Iceberg and Hudi add ACID commits, time travel, schema evolution and row-level deletes on top of Parquet files."],
+   ["Avro","Row-based with the schema attached. Fast to write one record at a time, which is why it is common on Kafka with a schema registry."],
+   ["Compression","Snappy is fast with a modest ratio. Zstd compresses better at a little more CPU. Columnar data with repeated values compresses very well."]
+  ],
+  qs:[
+   {q:"`SELECT AVG(price) FROM sales` on a table with 200 columns. Which format reads the least data?",o:["Parquet","CSV","JSON Lines","Avro"],w:"Columnar storage reads only the price column; row formats read every byte of every row."},
+   {q:"You partition a table by `user_id` and there are 50 million users. What happens?",o:["Millions of tiny files and slow metadata operations: the small files problem","Every query gets faster","Storage cost drops to zero","Nothing changes"],w:"Partition by low-to-medium cardinality columns you filter on, usually a date."},
+   {q:"Predicate pushdown in Parquet works because…",o:["Row groups store min/max statistics, so readers skip blocks that can't match","Files are sorted alphabetically","Parquet is row-based","The engine caches all data in memory"],w:"If a filter asks for price > 500 and a row group's max is 120, the whole group is skipped."},
+   {q:"Which feature does Apache Iceberg give you that a folder of plain Parquet files doesn't?",o:["Time travel to earlier table snapshots","Columnar compression","Storage in S3","Being readable by Spark"],w:"Iceberg tracks snapshots in metadata, so you can query the table as of an earlier version."},
+   {q:"Which format is most typical for Kafka messages used with a schema registry?",o:["Avro","Parquet","XLSX","ORC"],w:"Avro is compact, row-based and schema-aware, which suits record-at-a-time streaming."},
+   {q:"A 5 TB event table is mostly queried for the last few days. Best partition column?",o:["event_date","event_id","user_email","A random UUID"],w:"Partition on the column your filters use, with sensible cardinality. Dates are the classic choice."}
+  ]},
+{ id:"model", code:"M04", name:"Data Modeling", col:2,row:0, deps:["sql"],
+  blurb:"Dimensional modeling: designing tables people can actually query and trust.",
+  notes:[
+   ["Star schema","A central fact table holding events and measures, surrounded by dimension tables that describe them (who, what, where, when)."],
+   ["Grain first","Declare what one fact row represents (\"one row per order line\") before choosing any columns. Mixed grain is the most common modeling bug."],
+   ["Measure types","Additive measures sum across every dimension (revenue). Semi-additive ones sum across some but not time (account balance). Non-additive ones never sum (ratios)."],
+   ["Slowly changing dimensions","Type 1 overwrites the old value. Type 2 adds a new row with <code>valid_from</code>, <code>valid_to</code>, <code>is_current</code>. Type 3 keeps a single \"previous value\" column."],
+   ["Surrogate keys","Warehouse-owned integer or hash keys that decouple you from source IDs and allow several versions of one entity under SCD2."],
+   ["Normalize vs denormalize","3NF removes redundancy for OLTP writes. Analytics trades some redundancy for fewer joins and faster reads."]
+  ],
+  qs:[
+   {q:"What should you decide first when designing a fact table?",o:["Its grain: what one row represents","The dashboard colors","How many dimensions it joins to","The partition column"],w:"Kimball's step one after picking the business process is to declare the grain. Everything else follows from it."},
+   {q:"A customer moves city. Analysts need sales by the city the customer lived in at the time of each sale. Which SCD type?",o:["Type 2","Type 1","Type 0","Type 3"],w:"Type 2 keeps full history as versioned rows. Type 1 would rewrite history, and Type 3 keeps only one previous value."},
+   {q:"An account's end-of-day balance is what kind of measure?",o:["Semi-additive: sums across accounts, not across days","Fully additive","Non-additive","A degenerate dimension"],w:"Adding Monday's and Tuesday's balance is meaningless, but adding all accounts on one day works."},
+   {q:"Why use surrogate keys in dimensions?",o:["They decouple the warehouse from source keys and enable SCD Type 2 versions","They are shorter to type","SQL requires them","They encrypt PII"],w:"Source keys change, collide across systems and can't represent multiple versions of the same entity."},
+   {q:"An order number stored on the fact table, with no dimension table of its own, is a…",o:["Degenerate dimension","Junk dimension","Conformed dimension","Role-playing dimension"],w:"It is a dimension key with nothing left to describe, so it lives directly on the fact."},
+   {q:"A conformed dimension is…",o:["A dimension with the same keys and meaning shared across several fact tables","A dimension in third normal form","A dimension with no NULLs","A dimension updated in real time"],w:"Conformed dimensions such as dim_date or dim_customer let you compare facts across business processes."}
+  ]},
+{ id:"proc", code:"M05", name:"Distributed Processing", col:2,row:1, deps:["store"],
+  blurb:"Spark-style engines: how work spreads across a cluster and where it gets slow.",
+  notes:[
+   ["Lazy evaluation","Transformations (<code>filter</code>, <code>select</code>, <code>join</code>) only build a plan. Actions (<code>count</code>, <code>write</code>, <code>collect</code>) execute it, so the optimizer sees the whole job first."],
+   ["Narrow vs wide","Narrow operations stay inside a partition. Wide operations (<code>groupBy</code>, <code>join</code>, <code>distinct</code>) shuffle data across the network, which is usually the most expensive step."],
+   ["Partitions","The unit of parallelism. Too few leave cores idle; too many add scheduling overhead. Around 100–200 MB per partition is a common target."],
+   ["Data skew","One key holds a huge share of rows, so one task runs far longer than the rest. Fixes: salting, adaptive query execution (AQE) skew joins, filtering hot keys."],
+   ["Broadcast join","Ship a small table to every executor so the big one never shuffles. Ideal for fact-to-lookup joins."],
+   ["Driver vs executors","The driver plans and coordinates; executors do the work. <code>collect()</code> pulls every row to the driver and can run it out of memory."]
+  ],
+  qs:[
+   {q:"`df.filter(...).select(...)` returns instantly, but `df.count()` takes minutes. Why?",o:["Spark is lazy: transformations only build a plan until an action runs","filter is cached automatically","count runs on a single thread","select is skipped by the optimizer"],w:"Nothing is computed until an action. count() is the first action, so it pays for the whole plan."},
+   {q:"Which operation triggers a shuffle?",o:["groupBy().agg()","filter()","withColumn()","select()"],w:"Grouping must bring all rows with the same key together, which moves data across partitions."},
+   {q:"You join a 2 TB fact table with a 20 MB country lookup. Best strategy?",o:["Broadcast the small table","Sort-merge join both sides","collect() both to the driver","CROSS JOIN, then filter"],w:"Broadcasting avoids shuffling 2 TB. Each executor gets its own copy of the 20 MB table."},
+   {q:"199 tasks finish in one minute and one runs for forty. Most likely cause?",o:["Data skew on the grouping or join key","Too much executor memory","Parquet is slow","The driver is idle"],w:"One straggler task almost always means one partition got far more data than the others."},
+   {q:"What's the risk of calling `df.collect()` on a large DataFrame?",o:["The driver runs out of memory because every row goes to one machine","It deletes the source data","It forces a broadcast join","None, it's free"],w:"Use write() for big outputs, and take(n) or show() when you only want a peek."},
+   {q:"\"Salting\" a skewed key means…",o:["Adding a random suffix to hot keys to spread them across partitions, then aggregating again","Encrypting the key","Dropping the hot keys","Hashing user passwords"],w:"key_1 … key_N spread the hot key's rows across N tasks; a second aggregation recombines them."}
+  ]},
+{ id:"orch", code:"M06", name:"Orchestration", col:3,row:0, deps:["model","proc"],
+  blurb:"Airflow-style scheduling: dependencies, retries, backfills and jobs that are safe to re-run.",
+  notes:[
+   ["DAGs","A pipeline is a directed acyclic graph of tasks. Edges are dependencies; cycles are impossible to schedule."],
+   ["Data intervals","In Airflow, the run for 2026-10-27 processes that day's data and starts once the interval has closed. The logical date is not the wall-clock run time."],
+   ["Idempotent writes","Overwrite the run's partition (<code>INSERT OVERWRITE</code>) or <code>MERGE</code> on keys instead of blind appends. Retries and backfills then never duplicate data."],
+   ["Backfills","Re-running historical intervals, for example after fixing a bug or adding a column. Only easy when tasks are idempotent and parameterized by date."],
+   ["Retries and alerts","Retry transient failures with backoff, alert on real ones, and track SLAs so people know when data will be late."],
+   ["Pass references, not data","XCom is for small metadata. Move big datasets through storage and pass the path. Sensors should run in deferrable or reschedule mode so they don't hold a worker slot."]
+  ],
+  qs:[
+   {q:"Why must a pipeline DAG be acyclic?",o:["A cycle would make a task depend on itself, so it could never be scheduled","The UI can't draw circles","Cycles use more memory","Acyclic graphs are cheaper to store"],w:"Topological ordering only exists for graphs without cycles."},
+   {q:"A daily job appends rows. It fails halfway through and the retry succeeds. What's wrong now?",o:["Duplicate rows left over from the partial first attempt","Nothing","The table is dropped","Rows are re-sorted"],w:"Appends aren't idempotent: the first attempt's partial write stays in the table."},
+   {q:"What's the safest write pattern for a daily partitioned job?",o:["Overwrite the partition for the run's date, or MERGE on business keys","Append","Drop the whole table, then insert","Write to a new randomly named table each day"],w:"Replacing exactly the slice a run owns makes it repeatable."},
+   {q:"Backfilling means…",o:["Running the pipeline for past date intervals, e.g. after a logic fix","Replacing NULLs with zeros","Adding indexes to a table","Restoring from a backup"],w:"Airflow can backfill a date range; the job logic decides whether that is painless."},
+   {q:"How should a task hand a 3 GB dataset to the next task?",o:["Write it to object storage and pass the path","Push it through XCom","Email it","Keep it in a global Python variable"],w:"XCom lives in the metadata database and is meant for small values. Tasks may also run on different workers."},
+   {q:"A sensor waits up to six hours for a file and holds a worker slot the whole time. Better approach?",o:["Run it in deferrable or reschedule mode so the slot is freed while waiting","Increase the timeout","Add more retries","Poll every second in a while loop"],w:"Deferrable operators hand the wait to the triggerer process, so workers stay free for real work."}
+  ]},
+{ id:"stream", code:"M07", name:"Streaming", col:3,row:1, deps:["proc"],
+  blurb:"Kafka and stream processing: partitions, offsets, delivery guarantees and time.",
+  notes:[
+   ["Topics and partitions","A topic is split into partitions. Order is guaranteed only within a partition, and the message key decides which partition a record goes to."],
+   ["Offsets","Each consumer tracks its position as an offset. Commit after processing for at-least-once; commit before processing and you risk losing messages."],
+   ["Consumer groups","Each partition is read by exactly one consumer in a group, so parallelism is capped by the partition count."],
+   ["Delivery semantics","At-most-once can lose data. At-least-once can duplicate it. Exactly-once needs idempotent producers plus transactions, or idempotent sinks."],
+   ["Windows","Tumbling: fixed, non-overlapping. Hopping/sliding: fixed size, overlapping. Session: closes after a gap of inactivity. Prefer event time over processing time."],
+   ["Watermarks and CDC","A watermark says how long to wait for late events before a window closes. Change data capture (e.g. Debezium) turns a database's transaction log into a stream."]
+  ],
+  qs:[
+   {q:"All events for one order must be processed in order. What do you do?",o:["Use order_id as the message key so they land in the same partition","Create one topic per order","Add more partitions","Use a random key"],w:"Same key → same partition → ordered."},
+   {q:"A topic has 6 partitions and the consumer group has 10 consumers. How many consume actively?",o:["6","10","1","60"],w:"One partition maps to at most one consumer per group. The extra four sit idle as standbys."},
+   {q:"A consumer commits its offset before processing a message, then crashes. Which guarantee is that?",o:["At-most-once: the message may be lost","At-least-once","Exactly-once","Retried forever"],w:"On restart it resumes after the committed offset, so the unprocessed message is skipped."},
+   {q:"Fixed-size, non-overlapping 5-minute buckets are…",o:["Tumbling windows","Sliding windows","Session windows","Global windows"],w:"Each event falls into exactly one tumbling window."},
+   {q:"A watermark of 10 minutes means…",o:["Events more than ~10 minutes behind the latest event time seen count as late","The job restarts every 10 minutes","Kafka keeps 10 minutes of data","Each window is 10 minutes long"],w:"Watermarks trade completeness for latency: wait longer and you catch more stragglers, but results arrive later."},
+   {q:"What captures row-level changes from Postgres' write-ahead log into Kafka?",o:["Debezium (change data capture)","Airflow","dbt","Tableau"],w:"Log-based CDC reads inserts, updates and deletes without querying the tables."}
+  ]},
+{ id:"qual", code:"M08", name:"Quality & Governance", col:4,row:.5, deps:["orch","stream"],
+  blurb:"Data people can trust: tests, contracts, lineage and handling personal data.",
+  notes:[
+   ["Quality dimensions","Freshness, completeness, uniqueness, validity, consistency and accuracy. Each one fails in its own way and needs its own check."],
+   ["Tests in the pipeline","Assert <code>not_null</code>, <code>unique</code>, <code>accepted_values</code> and <code>relationships</code> with dbt tests or Great Expectations, and fail the run when they break."],
+   ["Data contracts","An agreed schema and meaning between the producer and consumers, checked in the producer's CI so breaking changes never ship silently."],
+   ["Lineage","A map of which sources feed which tables and dashboards. Essential for impact analysis and for finding root causes."],
+   ["PII","Classify sensitive columns, mask or tokenize them, grant least-privilege access, and plan for deletion requests (GDPR right to erasure)."],
+   ["Write-audit-publish","Write to a staging location, run the checks, and publish to consumers only if they pass."]
+  ],
+  qs:[
+   {q:"At 2 pm the dashboard still shows the day before yesterday because the load never ran. Which quality dimension failed?",o:["Freshness","Uniqueness","Validity","Consistency"],w:"The data may be correct, but it is late. Freshness checks alert on that."},
+   {q:"Which dbt test catches duplicate `order_id` values?",o:["unique","not_null","accepted_values","relationships"],w:"unique asserts that no value appears twice in the column."},
+   {q:"Write-audit-publish means…",o:["Write to staging, run checks, and publish only if they pass","Publish first and audit later","Write to production and roll back if users complain","Log every write to an audit table"],w:"Consumers never see data that failed its checks."},
+   {q:"An upstream team renames a column and 12 dashboards break. What prevents this best?",o:["A data contract enforced in the producer's CI","More dashboards","A nightly status email","A bigger warehouse"],w:"Contracts move the failure to the producer's pull request, before anything breaks downstream."},
+   {q:"Before changing a table you want to know every downstream model and dashboard that uses it. You need…",o:["Lineage","A bigger cluster","Partitioning","A primary key"],w:"Lineage graphs answer \"what breaks if I change this?\""},
+   {q:"How can analysts join on email addresses without seeing them?",o:["Pseudonymize them with a consistent keyed hash or token and restrict the raw column","Give everyone admin access","Export everything to CSV","Delete all emails"],w:"A consistent token still joins across tables, but exposes no personal data."}
+  ]},
+{ id:"boss", code:"BOSS", name:"Design Review", col:5,row:.5, deps:["qual"], boss:true,
+  blurb:"The final boss: system design scenarios that pull every module together. Eight tasks, three retries.",
+  notes:[
+   ["Trade-offs","Every design balances latency, cost, correctness and operational complexity. Ask what the consumer actually needs before reaching for streaming."],
+   ["Medallion layers","Bronze holds raw ingested data, silver holds cleaned and conformed data, gold holds business-ready aggregates and marts."],
+   ["Offload analytics","Never run heavy analytics on a production OLTP database. Replicate with CDC into a warehouse or lakehouse instead."],
+   ["Cost levers","Partition and cluster on filter columns, avoid <code>SELECT *</code>, auto-suspend idle compute, right-size clusters, and materialize expensive results."],
+   ["Duplicates by design","Retries make duplicates normal. Give events a unique ID and make sinks idempotent with <code>MERGE</code> or upserts."],
+   ["SLAs and SLOs","State your promise in consumer terms (\"gold tables ready by 07:00 on 99% of days\") and measure it."]
+  ],
+  qs:[
+   {q:"Product wants clickstream dashboards updated within one minute. Which architecture?",o:["Kafka → stream processor (Flink or Spark Structured Streaming) → real-time OLAP store","Nightly CSV export into the warehouse","An hourly Airflow job querying the production database","A shared spreadsheet"],w:"A one-minute latency requirement rules out schedule-based batch."},
+   {q:"Analytics queries on the production Postgres are slowing down checkout. Fix?",o:["Replicate the data into a warehouse via CDC and query it there","Build more dashboards","Only run queries at lunchtime","Drop the indexes"],w:"Separate OLTP and OLAP workloads. CDC keeps the copy fresh without touching the tables."},
+   {q:"The warehouse bill doubled. A popular query scans a full 10 TB table to read last week's data. First fix?",o:["Partition or cluster on date and filter on that column","Buy reserved capacity","Copy the table with SELECT *","Disable result caching"],w:"Pruning cuts the bytes scanned, which is what most warehouses bill for."},
+   {q:"A correction to last month's orders arrives late. Your daily jobs are idempotent per partition. What do you do?",o:["Backfill the affected date partitions","Drop the table and start over","Patch the dashboards by hand","Ignore it"],w:"This is exactly the payoff of idempotent, date-parameterized jobs."},
+   {q:"Medallion architecture layers, in order:",o:["Bronze (raw) → Silver (cleaned) → Gold (business-ready)","Gold → Silver → Bronze","Raw → Gold → Silver","Silver → Bronze → Gold"],w:"Each layer refines the one before it."},
+   {q:"Downstream tables show duplicate events after producer retries. Robust fix?",o:["Deduplicate on a unique event_id with idempotent upserts (MERGE) at the sink","Ask producers to stop retrying","Add more partitions","Add a sleep before each write"],w:"Retries are necessary for reliability, so the sink has to tolerate them."},
+   {q:"You must erase one user's data from a lakehouse table under GDPR. What makes this practical?",o:["A row-level DELETE in a table format like Delta or Iceberg, then expiring old snapshots","Rewriting the whole lake by hand","Renaming the column","Hiding the user in dashboards"],w:"Table formats support deletes; expiring snapshots removes the old files that still hold the data."},
+   {q:"Which measure best shows a pipeline kept its promise to consumers?",o:["A freshness and success SLO, e.g. gold tables ready by 07:00 on 99% of days","The number of tasks in the DAG","Lines of code","Average CPU usage"],w:"Measure what the consumer feels, not internal activity."}
+  ]}
+];
+const RANKS=[[0,"Intern"],[1000,"Junior DE"],[2500,"Data Engineer"],[4500,"Senior DE"],[6500,"Staff DE"],[8000,"Principal DE"]];
+const BADGES=[
+ ["first","First Commit","Finish any module","C"],
+ ["perfect","Zero Defects","Finish a module without a miss","0"],
+ ["combo","Hot Path","Answer 5 in a row correctly","5"],
+ ["half","Halfway Merge","Finish 4 modules","4"],
+ ["dag","Full DAG","Finish all 8 core modules","8"],
+ ["boss","Design Approved","Beat the Design Review","B"],
+ ["gold","Gold Standard","3 stars on every module","★"]
+];
+
+/* ---------- State ---------- */
+const KEY="pipeline-quest-v1";
+let S={done:{},badges:[]};
+try{const raw=localStorage.getItem(KEY); if(raw) S=Object.assign(S,JSON.parse(raw));}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+const byId=Object.fromEntries(MODULES.map(m=>[m.id,m]));
+const $=s=>document.querySelector(s);
+const app=$("#app");
+let run=null, view="map", tab="notes", cur=null, resetArmed=false;
+
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const fmt=s=>esc(s).replace(/`([^`]+)`/g,"<code>$1</code>");
+const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const unlocked=m=>m.deps.every(d=>S.done[d]);
+const totalXp=()=>Object.values(S.done).reduce((a,d)=>a+d.best,0);
+const totalStars=()=>Object.values(S.done).reduce((a,d)=>a+d.stars,0);
+const starStr=n=>"★".repeat(n)+'<span class="off">'+"★".repeat(3-n)+"</span>";
+
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2600)}
+
+function hud(){
+  const xp=totalXp(); let i=0; while(i<RANKS.length-1&&xp>=RANKS[i+1][0]) i++;
+  $("#hudRank").textContent=RANKS[i][1];
+  $("#hudXp").textContent=xp.toLocaleString();
+  const next=RANKS[i+1];
+  $("#hudXpLbl").textContent=next?`XP · next: ${next[1]} at ${next[0].toLocaleString()}`:"XP · max rank";
+  $("#hudBar").style.width=next?((xp-RANKS[i][0])/(next[0]-RANKS[i][0])*100)+"%":"100%";
+  $("#hudStars").textContent=`${totalStars()} / ${MODULES.length*3}`;
+}
+
+/* ---------- Map ---------- */
+function renderMap(){
+  view="map"; run=null;
+  const doneN=Object.keys(S.done).length;
+  app.innerHTML=`<div class="stack">
+    <section class="section">
+      <div><h1>Build your data engineering career, one pipeline stage at a time</h1>
+      <p class="lede">Each node is a module. Read its field notes, then run the job: answer the tasks to earn XP, chain correct answers for a combo multiplier, and keep your three retries. Finishing a module unlocks the stages downstream of it.</p></div>
+      <div class="mapcard"><div id="map"><svg id="edges" aria-hidden="true"></svg></div></div>
+      <div class="legend">
+        <span><i class="sw" style="border-color:var(--accent);background:var(--accent-soft)"></i>Ready to run</span>
+        <span><i class="sw" style="border-color:var(--ok)"></i>Finished (best stars)</span>
+        <span><i class="sw" style="border-color:var(--line);background:var(--sunk)"></i>Locked until upstream finishes</span>
+        <span class="mono">${doneN}/${MODULES.length} modules done</span>
+      </div>
+    </section>
+    <section class="section">
+      <h2>Badges</h2>
+      <div class="badges">${BADGES.map(([id,n,d,ic])=>`<div class="badge ${S.badges.includes(id)?"on":""}"><span class="ic">${ic}</span><div><b>${n}</b><small>${d}</small></div></div>`).join("")}</div>
+    </section>
+    <div class="row foot"><span>Progress is saved in this browser.</span>
+      <button class="btn ghost danger" id="reset">${resetArmed?"Click again to erase all progress":"Reset progress"}</button></div>
+  </div>`;
+  const map=$("#map");
+  MODULES.forEach(m=>{
+    const b=document.createElement("button");
+    const d=S.done[m.id], ok=unlocked(m);
+    b.className="node "+(d?"done":ok?"ready":"locked")+(m.boss?" boss":"");
+    b.dataset.id=m.id;
+    b.innerHTML=`<span class="id">${m.code}</span><span class="nm">${m.name}</span><span class="st">${d?starStr(d.stars):ok?"READY ▸":"LOCKED"}</span>`;
+    b.setAttribute("aria-label",`${m.name}: ${d?d.stars+" stars":ok?"ready":"locked"}`);
+    if(!ok) b.setAttribute("aria-disabled","true");
+    b.onclick=()=>{ if(ok){cur=m;tab="notes";renderModule();scrollTo(0,0)} else toast(`Locked. Finish ${m.deps.filter(x=>!S.done[x]).map(x=>byId[x].name).join(" and ")} first.`)};
+    map.appendChild(b);
+  });
+  layoutMap();
+  $("#reset").onclick=()=>{ if(resetArmed){S={done:{},badges:[]};save();resetArmed=false;hud();renderMap();toast("Progress erased")} else {resetArmed=true;renderMap()} };
+}
+function layoutMap(){
+  const map=$("#map"); if(!map) return;
+  const W=map.clientWidth, narrow=W<760;
+  const H=narrow?6*112:330;
+  map.style.height=H+"px";
+  const nodeW=narrow?Math.min(200,W/2-20):Math.min(150,W/6-14);
+  const pos={};
+  MODULES.forEach(m=>{
+    const x=narrow?(m.row+.5)/2*W:(m.col+.5)/6*W;
+    const y=narrow?(m.col+.5)/6*H:(m.row+.5)/2*H;
+    pos[m.id]=[x,y];
+    const el=map.querySelector(`[data-id="${m.id}"]`);
+    el.style.left=x+"px"; el.style.top=y+"px"; el.style.width=nodeW+"px";
+  });
+  const svg=$("#edges"); svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.innerHTML=MODULES.flatMap(m=>m.deps.map(d=>{
+    const [x1,y1]=pos[d],[x2,y2]=pos[m.id];
+    const p=narrow?`M${x1} ${y1} C${x1} ${(y1+y2)/2} ${x2} ${(y1+y2)/2} ${x2} ${y2}`:`M${x1} ${y1} C${(x1+x2)/2} ${y1} ${(x1+x2)/2} ${y2} ${x2} ${y2}`;
+    return `<path d="${p}" class="${S.done[d]?"live":""}"/>`;
+  })).join("");
+}
+addEventListener("resize",()=>{ if(view==="map") layoutMap() });
+
+/* ---------- Module ---------- */
+function renderModule(){
+  view="module"; const m=cur, d=S.done[m.id];
+  app.innerHTML=`<div class="stack">
+    <div class="modhead">
+      <div class="row"><button class="btn ghost" id="back">← Map</button><span class="lbl">${m.code} · ${m.qs.length} tasks · 3 retries</span>${d?`<span class="lbl" style="color:var(--xp)">Best ${d.best} XP · ${"★".repeat(d.stars)}</span>`:""}</div>
+      <h1>${m.name}</h1><p class="lede">${m.blurb}</p>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tNotes" aria-selected="${tab==="notes"}">Field notes</button>
+      <button class="tab" role="tab" id="tRun" aria-selected="${tab==="run"}">Run the job</button>
+    </div>
+    <div id="pane"></div>
+  </div>`;
+  $("#back").onclick=renderMap;
+  $("#tNotes").onclick=()=>{tab="notes";renderModule()};
+  $("#tRun").onclick=()=>{tab="run";startRun()};
+  if(tab==="notes"){
+    $("#pane").innerHTML=`<div class="section"><div class="notes">${m.notes.map(([t,b])=>`<article class="note"><h3>${t}</h3><p>${b}</p></article>`).join("")}</div>
+      <div class="row"><button class="btn primary" id="go">Run the job ▸</button><span class="foot">Every task is based on these notes.</span></div></div>`;
+    $("#go").onclick=()=>{tab="run";startRun()};
+  } else renderQ();
+}
+
+/* ---------- Quiz run ---------- */
+function startRun(){
+  const m=cur;
+  run={qs:shuffle(m.qs).map(q=>({...q,opts:shuffle(q.o.map((t,i)=>({t,ok:i===0})))})),i:0,lives:3,streak:0,maxStreak:0,xp:0,misses:[],marks:[],picked:null};
+  renderModule();
+}
+function renderQ(){
+  const q=run.qs[run.i], n=run.qs.length;
+  $("#pane").innerHTML=`<div class="quiz">
+    <div class="qcard">
+      <div class="qmeta"><span class="lbl">Task ${run.i+1} of ${n}</span><span class="lbl">Keys <span class="kbd">1</span>–<span class="kbd">4</span> · <span class="kbd">Enter</span></span></div>
+      <p class="qtext">${fmt(q.q)}</p>
+      ${q.c?`<pre>${esc(q.c)}</pre>`:""}
+      <div class="opts">${q.opts.map((o,i)=>`<button class="opt" data-i="${i}"><span class="k">${i+1}</span><span>${fmt(o.t)}</span></button>`).join("")}</div>
+      <div id="fb"></div>
+    </div>
+    <aside class="side" id="side">${sideHtml()}</aside></div>`;
+  document.querySelectorAll(".opt").forEach(b=>b.onclick=()=>answer(+b.dataset.i));
+}
+function sideHtml(){
+  const mult=1+.25*Math.min(run.streak,4);
+  return `<div class="pips">${run.qs.map((_,i)=>`<i class="${run.marks[i]||(i===run.i?"cur":"")}"></i>`).join("")}</div>
+      <div class="line"><span class="lbl">Retries</span><span class="lives">${[0,1,2].map(i=>`<i class="${i<run.lives?"":"lost"}"></i>`).join("")}</span></div>
+      <div class="line"><span class="lbl">Combo</span><span class="combo">×${+mult.toFixed(2)}</span></div>
+      <div class="line"><span class="lbl">Run XP</span><span class="val">${run.xp}</span></div>
+      <p class="foot" style="margin:0">Each correct answer is worth 100 XP times your combo. A miss resets the combo and costs a retry.</p>`;
+}
+function answer(i){
+  if(run.picked!==null) return;
+  run.picked=i;
+  const q=run.qs[run.i], o=q.opts[i];
+  document.querySelectorAll(".opt").forEach((b,j)=>{b.disabled=true;
+    if(q.opts[j].ok) b.classList.add("right"); else if(j===i) b.classList.add("wrong"); else b.classList.add("dim");});
+  let head;
+  if(o.ok){
+    const gain=Math.round(100*(1+.25*Math.min(run.streak,4)));
+    run.xp+=gain; run.streak++; run.maxStreak=Math.max(run.maxStreak,run.streak); run.marks[run.i]="ok";
+    head=`<b style="color:var(--ok)">Correct</b> <span class="pop">+${gain} XP</span>`;
+  } else {
+    run.lives--; run.streak=0; run.marks[run.i]="bad";
+    run.misses.push({q:q.q,c:q.c,a:q.opts.find(x=>x.ok).t,w:q.w});
+    head=`<b style="color:var(--bad)">Miss</b> · ${run.lives} ${run.lives===1?"retry":"retries"} left`;
+  }
+  $("#side").innerHTML=sideHtml();
+  const last=run.lives===0||run.i===run.qs.length-1;
+  $("#fb").innerHTML=`<div class="section" style="gap:12px"><div class="why">${head}<br>${fmt(q.w)}</div>
+    <div class="row"><button class="btn primary" id="next">${run.lives===0?"See job log":last?"Finish run":"Next task"} ▸</button></div></div>`;
+  $("#next").onclick=next; $("#next").focus();
+}
+function next(){
+  if(run.lives===0||run.i===run.qs.length-1) return finish();
+  run.i++; run.picked=null; renderQ();
+}
+function finish(){
+  const m=cur, passed=run.lives>0, misses=run.misses.length;
+  const stars=passed?3-misses:0;
+  const prev=S.done[m.id]; let newBest=false;
+  if(passed){
+    if(!prev||run.xp>prev.best||stars>prev.stars){ newBest=!prev||run.xp>prev.best;
+      S.done[m.id]={best:Math.max(run.xp,prev?prev.best:0),stars:Math.max(stars,prev?prev.stars:0)}; }
+  }
+  const unlockedNow=passed&&!prev?MODULES.filter(x=>x.deps.includes(m.id)&&unlocked(x)).map(x=>x.name):[];
+  const earned=checkBadges(passed&&misses===0,run.maxStreak);
+  save(); hud(); view="result";
+  app.innerHTML=`<div class="result">
+    <span class="lbl">${m.code} · ${m.name}</span>
+    <div class="verdict ${passed?"ok":"bad"}">${passed?"JOB SUCCEEDED":"JOB FAILED"}</div>
+    ${passed?`<div class="stars">${starStr(stars)}</div>`:`<p class="lede" style="margin:0">You ran out of retries. Review the misses below, skim the field notes, and run it again.</p>`}
+    <div class="log"><span>tasks_passed</span><span>${run.marks.filter(x=>x==="ok").length} / ${run.qs.length}</span>
+      <span>max_combo</span><span>${run.maxStreak} in a row</span>
+      <span>xp_earned</span><span>${passed?run.xp:0}${newBest&&prev?" (new best)":""}</span>
+      ${unlockedNow.length?`<span>unlocked</span><span>${unlockedNow.join(", ")}</span>`:""}
+      ${earned.length?`<span>badges</span><span>${earned.join(", ")}</span>`:""}</div>
+    ${misses?`<h2>Review your misses</h2>${run.misses.map(x=>`<div class="miss"><p>${fmt(x.q)}</p>${x.c?`<pre>${esc(x.c)}</pre>`:""}<p class="a">${fmt(x.a)}</p><p class="w">${fmt(x.w)}</p></div>`).join("")}`:""}
+    <div class="row"><button class="btn primary" id="toMap">Back to map</button><button class="btn" id="again">Run again</button><button class="btn ghost" id="notes">Field notes</button></div>
+  </div>`;
+  $("#toMap").onclick=renderMap; $("#again").onclick=()=>{tab="run";startRun()}; $("#notes").onclick=()=>{tab="notes";renderModule()};
+  $("#toMap").focus(); scrollTo(0,0);
+  earned.forEach((b,k)=>setTimeout(()=>toast("Badge unlocked: "+b),400+k*2800));
+}
+function checkBadges(perfect,maxStreak){
+  const core=MODULES.filter(m=>!m.boss), n=Object.keys(S.done).length;
+  const rules={first:n>=1,perfect,combo:maxStreak>=5,half:n>=4,dag:core.every(m=>S.done[m.id]),boss:!!S.done.boss,
+    gold:MODULES.every(m=>S.done[m.id]&&S.done[m.id].stars===3)};
+  const got=[];
+  BADGES.forEach(([id,name])=>{ if(rules[id]&&!S.badges.includes(id)){S.badges.push(id);got.push(name)} });
+  return got;
+}
+addEventListener("keydown",e=>{
+  if(view!=="module"||tab!=="run"||!run) return;
+  if(run.picked===null&&/^[1-4]$/.test(e.key)){const i=+e.key-1; if(run.qs[run.i].opts[i]) answer(i)}
+  else if(run.picked!==null&&e.key==="Enter"&&document.activeElement?.id!=="next"){e.preventDefault();next()}
+});
+
+hud(); renderMap();
+</script>
+</body>
+</html>
